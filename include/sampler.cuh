@@ -430,6 +430,7 @@ class Walker {
   char *valid;
   uint device_id;
   size_t sampled_edges = 0;
+  uint num_runs;
 
  public:
   Walker(gpu_graph graph, uint _device_id = 0) : device_id(_device_id) {

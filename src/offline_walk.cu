@@ -7,6 +7,73 @@
  */
 #include "app.cuh"
 
+__global__ void sample_kernel_escape(Walker *walker, float ratio) {
+  Jobs_result<JobType::RW, uint> &result = walker->result;
+  gpu_graph *graph = &walker->ggraph;
+  curandState state;
+  curand_init(TID, 0, 0, &state);
+
+  // TODO: add state for num runs
+  size_t idx_i = TID;
+  uint src = graph->adjsrc[idx_i];
+  uint k = graph->adjk[idx_i];
+
+  if (idx_i < result.size) {
+    // printf("TID: %d, Src: %d (Degree: %d), Current: %d\n", (uint)idx_i, graph->adjsrc[TID], graph->getDegree(graph->adjsrc[TID]), graph->adjk[TID]);
+
+    uint currentDegree = graph->getDegree(src);
+    assert(currentDegree > 0);
+
+    size_t numRuns = walker->num_runs / currentDegree;
+
+    uint divider = (uint)1.0/ratio;
+    if (divider > currentDegree)
+      numRuns = divider; 
+
+    uint sumPhiLocal = 0;
+    
+    for (size_t i = 0; i < numRuns; i++) {
+      uint current = k;
+      currentDegree = graph->getDegree(current);
+      do {
+        if(current == src) {
+          sumPhiLocal += 1;
+          break;
+        }
+        Vector_virtual<uint> alias;
+        Vector_virtual<float> prob;
+        alias.Construt(
+            graph->alias_array + graph->xadj[current] - graph->local_vtx_offset,
+            currentDegree);
+        prob.Construt(
+            graph->prob_array + graph->xadj[current] - graph->local_vtx_offset,
+            currentDegree);
+        alias.Init(currentDegree);
+        prob.Init(currentDegree);
+        const uint target_size = 1;
+        if (target_size < currentDegree) {
+          //   int itr = 0;
+          // for (size_t i = 0; i < target_size; i++) {
+          int col = (int)floor(curand_uniform(&state) * currentDegree);
+          float p = curand_uniform(&state);
+          uint candidate;
+          if (p < prob[col])
+            candidate = col;
+          else
+            candidate = alias[col];
+            current = graph->getOutNode(current, candidate);
+          // }
+        } else if (currentDegree == 0) {
+          result.alive[idx_i] = 0;
+          break;
+        } else {
+          current = graph->getOutNode(current, 0);
+        }
+      } while (result.alive[idx_i] != 0 && current != graph->maxD);
+    } 
+  }
+}
+
 __global__ void sample_kernel_static_buffer(Walker *walker) {
   Jobs_result<JobType::RW, uint> &result = walker->result;
   gpu_graph *graph = &walker->ggraph;
@@ -188,6 +255,21 @@ float OfflineWalk(Walker &walker) {
   int n_sm = prop.multiProcessorCount;
 
   Walker *sampler_ptr;
+  // printf("OfflineWalk xadj:\n");
+  // for(size_t i = 0; i < 200; i++) {
+  //   printf("%d, ", walker.ggraph.xadj[i]);
+  // }
+  // printf("\n\n");
+  // printf("OfflineWalk adjsrc:\n");
+  // for(size_t i = 0; i < 200; i++) {
+  //   printf("%d, ", walker.ggraph.adjsrc[i]);
+  // }
+  // printf("\n\n");
+  // printf("OfflineWalk adjk:\n");
+  // for(size_t i = 0; i < 200; i++) {
+  //   printf("%d, ", walker.ggraph.adjk[i]);
+  // }
+  // printf("\n\n");
   MyCudaMalloc(&sampler_ptr, sizeof(Walker));
   CUDA_RT_CALL(
       cudaMemcpy(sampler_ptr, &walker, sizeof(Walker), cudaMemcpyHostToDevice));
@@ -210,9 +292,11 @@ float OfflineWalk(Walker &walker) {
     else
       sample_kernel_static<<<walker.num_seed / BLOCK_SIZE + 1, BLOCK_SIZE, 0,
                              0>>>(sampler_ptr);
-  }
-
-  else
+  } else if (FLAGS_escape) {
+    LOG("Escape\n", __FUNCTION__);
+    sample_kernel_escape<<<walker.num_seed / BLOCK_SIZE + 1, BLOCK_SIZE, 0,
+                             0>>>(sampler_ptr, FLAGS_ratio);
+  } else
     sample_kernel<<<block_num, BLOCK_SIZE, 0, 0>>>(sampler_ptr);
 #endif
   CUDA_RT_CALL(cudaDeviceSynchronize());

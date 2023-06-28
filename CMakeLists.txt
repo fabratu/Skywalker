@@ -24,13 +24,14 @@ link_directories(${PROJECT_BINARY_DIR}/deps/gflags/lib)
 ############## BUILD ##############   
 set(EXTRA_LIBS gflags)
 
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS}  -rdc=true  -res-usage -lnuma -fopenmp  -Xptxas -v ")
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS}  -rdc=true  -res-usage -lnuma -fopenmp  -Xptxas -v -gencode arch=compute_80,code=sm_80")
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
   message("Debug mode")
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -g -G -O0 -Xcompiler   -ggdb  -lnvrt -Woverloaded-virtual")
 else()
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -lineinfo -O3 -Xcompiler  -DNDEBUG ")
 endif()
+message("CUDA: ${CMAKE_CUDA_FLAGS}")
 
 # -gencode arch=compute_75,code=sm_75 -std=c++11
 
@@ -95,9 +96,9 @@ endif()
 set_target_properties(skywalker_node2vec PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 set_target_properties(skywalker_node2vec PROPERTIES COMPILE_DEFINITIONS  LOCALITY)
 
-set_property(TARGET skywalker PROPERTY CUDA_ARCHITECTURES 75)
-set_property(TARGET skywalker skywalker_noloc PROPERTY CUDA_ARCHITECTURES 75)
-set_property(TARGET skywalker_node2vec PROPERTY CUDA_ARCHITECTURES 75)
+set_property(TARGET skywalker PROPERTY CUDA_ARCHITECTURES 80)
+set_property(TARGET skywalker skywalker_noloc PROPERTY CUDA_ARCHITECTURES 80)
+set_property(TARGET skywalker_node2vec PROPERTY CUDA_ARCHITECTURES 80)
 
 # add_executable(skywalker_degree
 #     ${DIR_SRCS}

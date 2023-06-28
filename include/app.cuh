@@ -19,6 +19,10 @@ DECLARE_bool(peritr);
 DECLARE_bool(static);
 DECLARE_bool(buffer);
 DECLARE_bool(loc);
+DECLARE_bool(escape);
+DECLARE_bool(absorb);
+DECLARE_double(ratio);
+
 template <typename T, uint length>
 struct duplicate_checker {
   T sampled[length];

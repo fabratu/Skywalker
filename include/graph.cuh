@@ -34,6 +34,7 @@ DECLARE_int32(weightrange);
 
 DECLARE_bool(csv);
 DECLARE_bool(v);
+DECLARE_bool(absorb);
 template <typename T>
 void PrintResults(T *results, uint n);
 
@@ -61,11 +62,15 @@ class Graph {
   edge_t *xadj, *xadj_d;
   vtx_t *adjncy, *adjncy_d;
   weight_t *adjwgt, *adjwgt_d;
+  vtx_t *adjsrc, *adjsrc_d;
+  vtx_t *adjk, *adjk_d;
   uint *inDegree;
   uint *outDegree;
   bool weighted;
   bool withWeight;
   uint MaxDegree;
+  uint maxD;
+
 
   // scheduler-specific
   int device = 0;
@@ -89,6 +94,8 @@ class Graph {
     if (xadj != nullptr) CUDA_RT_CALL(cudaFreeHost(xadj));
     if (adjncy != nullptr) CUDA_RT_CALL(cudaFreeHost(adjncy));
     if (adjwgt != nullptr) CUDA_RT_CALL(cudaFreeHost(adjwgt));
+    if (adjsrc != nullptr) CUDA_RT_CALL(cudaFreeHost(adjsrc));
+    if (adjk != nullptr) CUDA_RT_CALL(cudaFreeHost(adjk));
     // free(xadj);
     // free(adjncy);
     // if (adjwgt != nullptr)
@@ -265,7 +272,7 @@ class Graph {
     // tmp = 3025271;
     // if (FLAGS_v)
     //   printf("%d has  out degree %d\n", tmp, outDegree[tmp]);
-    uint maxD = std::distance(
+    maxD = std::distance(
         outDegree, std::max_element(outDegree, outDegree + num_Node));
     // if (FLAGS_v)
     LOG("%d has max out degree %d\n", maxD, outDegree[maxD]);
@@ -314,6 +321,25 @@ class Graph {
         assert(false &&
                "Not implemented"); /* need to convert sizes when reading */
       }
+    }
+
+    if(FLAGS_absorb) {
+      adjsrc = (vtx_t *)malloc(num_Edge * sizeof(uint));
+      adjk = (vtx_t *)malloc(num_Edge * sizeof(uint));
+      size_t index = 0;
+      for(size_t i = 0; i < num_Node; i++) {
+        for(size_t j = 0; j < outDegree[i]; j++) {
+          adjsrc[index] = i;
+          adjk[index] = adjncy[xadj[i]+j];
+          index++;
+        }
+      }
+
+      // cout << "adjk: ";
+      // for(size_t i = 0; i < num_Edge; i++) {
+      //   cout << adjk[i] << ",";
+      // }
+      // cout << endl;
     }
     // for (size_t i = 0; i < 10; i++) {
     //   printf("\n");

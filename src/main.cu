@@ -110,6 +110,8 @@ DEFINE_bool(csv, false, "CSV output");
 
 DEFINE_bool(escape, false, "Use escape vector runs");
 DEFINE_bool(absorb, false, "Only meaningful if used in tandem with escape set to true. If true, use inverse absorb runs.");
+DEFINE_double(ratio, 0.1, "Ratio for setting minimum number of runs for high degree nodes.");
+DEFINE_int32(num_runs, 1000, "Number of runs for each escape walk (based on source; normalized).")
 
 int main(int argc, char *argv[]) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
@@ -203,6 +205,11 @@ int main(int argc, char *argv[]) {
     hops[1] = 25;
     hops[2] = 10;
   }
+
+  if (FLAGS_escape) {
+    FLAGS_absorb = true;
+  }
+
   Graph *ginst = new Graph();
   if (ginst->numEdge > 600000000) {
     // if (FLAGS_ngpu == 1) {
@@ -360,6 +367,9 @@ int main(int argc, char *argv[]) {
         } else {
           Walker walker(samplers[dev_id]);
           walker.SetSeed(local_sample_size, Depth + 1, dev_num, dev_id);
+          if(FLAGS_escape) {
+            walker.num_runs = FLAGS_num_runs;
+          }
           time[dev_id] = OfflineWalk(walker);
           samplers[dev_id].sampled_edges = walker.sampled_edges;
         }
