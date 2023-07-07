@@ -12,6 +12,7 @@ DECLARE_bool(ol);
 DECLARE_bool(umtable);
 DECLARE_bool(hmtable);
 DECLARE_bool(itl);
+DECLARE_bool(escape);
 
 DECLARE_bool(replica);
 // struct sample_result;

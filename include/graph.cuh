@@ -34,7 +34,7 @@ DECLARE_int32(weightrange);
 
 DECLARE_bool(csv);
 DECLARE_bool(v);
-DECLARE_bool(absorb);
+DECLARE_bool(absorbphik);
 template <typename T>
 void PrintResults(T *results, uint n);
 
@@ -70,6 +70,7 @@ class Graph {
   bool withWeight;
   uint MaxDegree;
   uint maxD;
+  uint maxInD;
 
 
   // scheduler-specific
@@ -323,7 +324,7 @@ class Graph {
       }
     }
 
-    if(FLAGS_absorb) {
+    if(FLAGS_absorbphik) {
       adjsrc = (vtx_t *)malloc(num_Edge * sizeof(uint));
       adjk = (vtx_t *)malloc(num_Edge * sizeof(uint));
       size_t index = 0;
@@ -349,7 +350,20 @@ class Graph {
     // }
     numNode = num_Node;
     numEdge = num_Edge;
+    maxInD = CalculateMaxInDegreeNode();
     gk_fclose(fpin);
   }
+  
+  // ToDo: Optimize to do this while reading the file.
+  uint CalculateMaxInDegreeNode() {
+    std::vector<uint64_t> counter(numNode, 0);
+    for (size_t i = 0; i < numEdge; i++) {
+      counter[adjncy[i]]++;
+    }
+    return std::distance(counter.begin(), std::max_element(counter.begin(), counter.begin() + numNode));
+
+  }
+
 };
+
 #endif

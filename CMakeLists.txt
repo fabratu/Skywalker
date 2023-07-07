@@ -23,13 +23,13 @@ link_directories(${PROJECT_BINARY_DIR}/deps/gflags/lib)
 
 ############## BUILD ##############   
 set(EXTRA_LIBS gflags)
-
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS}  -rdc=true  -res-usage -lnuma -fopenmp  -Xptxas -v -gencode arch=compute_80,code=sm_80")
+#-Xptxas -v -res-usage
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS}  -rdc=true  -lnuma -fopenmp  -gencode arch=compute_80,code=sm_80")
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
   message("Debug mode")
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -g -G -O0 -Xcompiler   -ggdb  -lnvrt -Woverloaded-virtual")
 else()
-  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -lineinfo -O3 -Xcompiler  -DNDEBUG ")
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -lineinfo -O3 -Xcompiler  -DNDEBUG --disable-warnings")
 endif()
 message("CUDA: ${CMAKE_CUDA_FLAGS}")
 

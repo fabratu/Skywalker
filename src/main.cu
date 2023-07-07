@@ -109,9 +109,11 @@ DEFINE_bool(newsampler, true, "use new sampler");
 DEFINE_bool(csv, false, "CSV output");
 
 DEFINE_bool(escape, false, "Use escape vector runs");
-DEFINE_bool(absorb, false, "Only meaningful if used in tandem with escape set to true. If true, use inverse absorb runs.");
+//TODO: Add a meaningful description for options
+DEFINE_bool(absorbphik, false, "Only meaningful if used in tandem with escape set to true. If true, use inverse absorb runs with k-threads.");
+DEFINE_bool(absorbesc, false, "Only meaningful if used in tandem with escape set to true. If true, use inverse absorb runs with escape vectors.");
 DEFINE_double(ratio, 0.1, "Ratio for setting minimum number of runs for high degree nodes.");
-DEFINE_int32(num_runs, 1000, "Number of runs for each escape walk (based on source; normalized).")
+DEFINE_int32(num_runs, 1000, "Number of runs for each escape walk (based on source; normalized).");
 
 int main(int argc, char *argv[]) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
@@ -206,9 +208,9 @@ int main(int argc, char *argv[]) {
     hops[2] = 10;
   }
 
-  if (FLAGS_escape) {
-    FLAGS_absorb = true;
-  }
+  // if (FLAGS_escape) {
+  //   FLAGS_absorb = true;
+  // }
 
   Graph *ginst = new Graph();
   if (ginst->numEdge > 600000000) {
@@ -277,11 +279,16 @@ int main(int argc, char *argv[]) {
 
       LOG("device_id %d ompid %d coreid %d\n", dev_id, omp_get_thread_num(),
           sched_getcpu());
+      LOG("Do we get here?\n");
       CUDA_RT_CALL(cudaSetDevice(dev_id));
+      LOG("Do we get here?\n");
       CUDA_RT_CALL(cudaFree(0));
 
       ggraphs[dev_id] = gpu_graph(ginst, dev_id);
+      LOG("Do we get here?\n");
       samplers[dev_id] = Sampler(ggraphs[dev_id], dev_id);
+
+      LOG("Do we get here?\n");
 
       if (!FLAGS_bias) {
         if (FLAGS_rw) {
@@ -328,6 +335,7 @@ int main(int argc, char *argv[]) {
       }
 
       if (FLAGS_bias && !FLAGS_ol) {  // offline biased
+                  LOG("Do we get here?\n");
         samplers[dev_id].InitFullForConstruction(dev_num, dev_id);
         time[dev_id] = ConstructTable(samplers[dev_id], dev_num, dev_id);
 
@@ -358,6 +366,7 @@ int main(int argc, char *argv[]) {
         }
 
         if (!FLAGS_rw) {  //&& FLAGS_k != 1
+          LOG("Do we get here?\n");
           samplers[dev_id].SetSeed(local_sample_size, Depth + 1, hops, dev_num,
                                    dev_id);
           samplers_new[dev_id] = samplers[dev_id];
@@ -366,9 +375,17 @@ int main(int argc, char *argv[]) {
           //   time[dev_id] = AsyncOfflineSample(samplers[dev_id]);
         } else {
           Walker walker(samplers[dev_id]);
-          walker.SetSeed(local_sample_size, Depth + 1, dev_num, dev_id);
           if(FLAGS_escape) {
-            walker.num_runs = FLAGS_num_runs;
+            if(FLAGS_absorbphik) {
+              walker.num_runs = FLAGS_num_runs;
+              walker.SetSeed(ginst->numEdge, Depth + 1, dev_num, dev_id);
+            } else if (FLAGS_absorbesc) {
+              walker.num_runs = FLAGS_num_runs;
+              walker.SetSeed(ginst->numNode, Depth + 1, dev_num, dev_id);
+
+            }
+          } else {
+            walker.SetSeed(local_sample_size, Depth + 1, dev_num, dev_id);
           }
           time[dev_id] = OfflineWalk(walker);
           samplers[dev_id].sampled_edges = walker.sampled_edges;

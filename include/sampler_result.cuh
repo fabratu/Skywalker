@@ -13,6 +13,7 @@ DECLARE_double(p);
 DECLARE_double(q);
 DECLARE_bool(umresult);
 DECLARE_bool(built);
+DECLARE_bool(escape);
 
 struct sample_job {
   uint idx;
@@ -469,6 +470,7 @@ struct Jobs_result<JobType::RW, T> {
   int *job_sizes = nullptr;
   uint *data2;
   uint device_id;
+  float *escape_array = nullptr;
 
   SamplerState<JobType::NODE2VEC, T> *state;
   float p = 2.0, q = 0.5;
@@ -486,6 +488,8 @@ struct Jobs_result<JobType::RW, T> {
       high_degrees_h[i].Free();
     }
     if (high_degrees != nullptr) CUDA_RT_CALL(cudaFree(high_degrees));
+
+    if (escape_array != nullptr) CUDA_RT_CALL(cudaFree(escape_array));
   }
   void init(uint _size, uint _hop_num, uint *seeds, uint _device_id = 0) {
     int dev_id = omp_get_thread_num();
@@ -512,6 +516,11 @@ struct Jobs_result<JobType::RW, T> {
           &state, size * sizeof(SamplerState<JobType::NODE2VEC, T>)));
       p = FLAGS_p;
       q = FLAGS_q;
+    }
+
+    if (FLAGS_escape) {
+      CUDA_RT_CALL(MyCudaMalloc(&escape_array, size * sizeof(float)));
+      CUDA_RT_CALL(cudaMemset(escape_array, 0.0, size * sizeof(float)));
     }
 
     {
@@ -591,17 +600,25 @@ struct Jobs_result<JobType::RW, T> {
 
   __device__ void PrintResult() {
     if (LTID == 0) {
+      if(escape_array != nullptr) {
+        printf("Resulting escape vector:\n");
+        for(size_t i = 0; i < size; i++) {
+          float escElement = 1.0 - escape_array[i];
+            printf("%.2f, ",escElement);
+        }
+        printf("\n");
+      }
       // printf("seeds \n");
       // for (size_t i = 0; i < MIN(3, size); i++) {
       //   printf("%u \t", GetData(0, i));
       // }
-      for (int j = 0; j < MIN(3, size); j++) {
-        printf("\n%drd path len %u \n", j, length[j]);
-        for (size_t i = 0; i < MIN(length[j], hop_num); i++) {
-          printf("%u \t", GetData(i, j));
-        }
-        printf("\n");
-      }
+      // for (int j = 0; j < MIN(3, size); j++) {
+      //   printf("\n%drd path len %u \n", j, length[j]);
+      //   for (size_t i = 0; i < MIN(length[j], hop_num); i++) {
+      //     printf("%u \t", GetData(i, j));
+      //   }
+      //   printf("\n");
+      // }
     }
   }
   __device__ T *GetDataPtr(uint itr, size_t idx) {

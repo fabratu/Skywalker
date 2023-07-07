@@ -18,7 +18,7 @@ DECLARE_bool(randomweight);
 DECLARE_bool(pf);
 DECLARE_bool(ab);
 DECLARE_double(pfr);
-DECLARE_bool(absorb);
+DECLARE_bool(absorbphik);
 // typedef uint edge_t;
 // typedef unsigned int vtx_t;
 // typedef float weight_t;
@@ -49,6 +49,7 @@ class gpu_graph {
   edge_t avg_degree;
   uint MaxDegree;
   uint maxD;
+  uint maxInD;
   uint device_id;
 
   Jobs_result<JobType::RW, uint> *result;
@@ -70,7 +71,7 @@ class gpu_graph {
     // #endif
   }
   gpu_graph(Graph *ginst, uint _device_id = 0) : device_id(_device_id) {
-    printf("How many times?\n");
+    LOG("Do we get here?\n");
     int dev_id = omp_get_thread_num();
     CUDA_RT_CALL(cudaSetDevice(dev_id));
 
@@ -85,8 +86,7 @@ class gpu_graph {
       CUDA_RT_CALL(MyCudaMallocManaged(&adjncy, edge_num * sizeof(vtx_t)));
       if (FLAGS_weight || FLAGS_randomweight)
         CUDA_RT_CALL(MyCudaMallocManaged(&adjwgt, edge_num * sizeof(weight_t)));
-      if (FLAGS_absorb) {
-        printf("helloooooooo\n");
+      if (FLAGS_absorbphik) {
         CUDA_RT_CALL(MyCudaMallocManaged(&adjsrc, edge_num * sizeof(vtx_t)));
         CUDA_RT_CALL(MyCudaMallocManaged(&adjk, edge_num * sizeof(vtx_t)));
       }
@@ -98,7 +98,7 @@ class gpu_graph {
       CUDA_RT_CALL(MyCudaMalloc(&adjncy, edge_num * sizeof(vtx_t)));
       if (FLAGS_weight || FLAGS_randomweight)
         CUDA_RT_CALL(MyCudaMalloc(&adjwgt, edge_num * sizeof(weight_t)));
-      if (FLAGS_absorb) {
+      if (FLAGS_absorbphik) {
         CUDA_RT_CALL(MyCudaMalloc(&adjsrc, edge_num * sizeof(vtx_t)));
         CUDA_RT_CALL(MyCudaMalloc(&adjk, edge_num * sizeof(vtx_t)));
       }
@@ -114,7 +114,7 @@ class gpu_graph {
       CUDA_RT_CALL(cudaMallocHost(&adjncy, edge_num * sizeof(vtx_t)));
       if (FLAGS_weight || FLAGS_randomweight)
         CUDA_RT_CALL(cudaMallocHost(&adjwgt, edge_num * sizeof(weight_t)));
-      if (FLAGS_absorb) {
+      if (FLAGS_absorbphik) {
         CUDA_RT_CALL(cudaMallocHost(&adjsrc, edge_num * sizeof(vtx_t)));
         CUDA_RT_CALL(cudaMallocHost(&adjk, edge_num * sizeof(vtx_t)));
       }
@@ -128,16 +128,7 @@ class gpu_graph {
     if (FLAGS_weight || FLAGS_randomweight)
       CUDA_RT_CALL(cudaMemcpy(adjwgt, ginst->adjwgt,
                               edge_num * sizeof(weight_t), cudaMemcpyDefault));
-    if (FLAGS_absorb) {
-      // for(size_t i = 0; i < 200; i++) {
-      //   printf("%d, ", ginst->adjsrc[i]);
-      // }
-      // printf("\n\n");
-      // for(size_t i = 0; i < 200; i++) {
-      //   printf("%d, ", ginst->adjk[i]);
-      // }
-      // printf("\n");
-      // printf("Num edge: %d\n",edge_num);
+    if (FLAGS_absorbphik) {
       CUDA_RT_CALL(cudaMemcpy(adjsrc, ginst->adjsrc, 
                               edge_num * sizeof(vtx_t), cudaMemcpyHostToDevice));
       CUDA_RT_CALL(cudaMemcpy(adjk, ginst->adjk, edge_num * sizeof(vtx_t), cudaMemcpyHostToDevice));
@@ -145,7 +136,14 @@ class gpu_graph {
 
     MaxDegree = ginst->MaxDegree;
     maxD = ginst->maxD;
-    if (FLAGS_umgraph) Set_Mem_Policy(FLAGS_weight || FLAGS_randomweight, FLAGS_absorb);
+    maxInD = ginst->maxInD;
+    uint numZero = 0;
+    for(size_t i = 0; i < ginst->numNode; i++) {
+      ginst->outDegree[i] == 0 ? numZero++ : numZero = numZero;
+    }
+      printf("Nodes with degree zero: %d, ", numZero);
+    printf("\n\n");
+    if (FLAGS_umgraph) Set_Mem_Policy(FLAGS_weight || FLAGS_randomweight, FLAGS_absorbphik);
     // bias = static_cast<BiasType>(FLAGS_dw);
     // getBias= &gpu_graph::getBiasImpl;
     // (graph->*(graph->getBias))
@@ -226,7 +224,7 @@ class gpu_graph {
       if (adjncy != nullptr) CUDA_RT_CALL(cudaFree(adjncy));
       if (adjwgt != nullptr && (FLAGS_weight || FLAGS_randomweight) && FLAGS_ol)
         CUDA_RT_CALL(cudaFree(adjwgt));
-      if (adjsrc != nullptr && FLAGS_absorb) {
+      if (adjsrc != nullptr && FLAGS_absorbphik) {
         CUDA_RT_CALL(cudaFree(adjsrc));
         CUDA_RT_CALL(cudaFree(adjk));
       }
@@ -236,7 +234,7 @@ class gpu_graph {
       if (adjncy != nullptr) CUDA_RT_CALL(cudaFreeHost(adjncy));
       if (adjwgt != nullptr && (FLAGS_weight || FLAGS_randomweight) && FLAGS_ol)
         CUDA_RT_CALL(cudaFreeHost(adjwgt));
-      if (adjsrc != nullptr && FLAGS_absorb) {
+      if (adjsrc != nullptr && FLAGS_absorbphik) {
         CUDA_RT_CALL(cudaFreeHost(adjsrc));
         CUDA_RT_CALL(cudaFreeHost(adjk));
       }
@@ -268,7 +266,7 @@ class gpu_graph {
   //   return xadj[node_id - local_vtx_offset];
   // }
 
-  __device__ bool BinarySearch(uint *ptr, uint size, int target) {
+  __device__ uint BinarySearch(uint *ptr, uint size, int target) {
     uint tmp_size = size;
     uint *tmp_ptr = ptr;
     // printf("checking %d\t", target);
@@ -276,22 +274,22 @@ class gpu_graph {
     while (itr < 50) {
       // printf("%u %u.\t",tmp_ptr[tmp_size / 2],target );
       if (tmp_ptr[tmp_size / 2] == target) {
-        return true;
+        return tmp_size / 2;
       } else if (tmp_ptr[tmp_size / 2] < target) {
         tmp_ptr += tmp_size / 2;
         if (tmp_size == 1) {
-          return false;
+          return 0;
         }
         tmp_size = tmp_size - tmp_size / 2;
       } else {
         tmp_size = tmp_size / 2;
       }
       if (tmp_size == 0) {
-        return false;
+        return 0;
       }
       itr++;
     }
-    return false;
+    return 0;
   }
   __device__ bool CheckConnect(int src, int dst) {
     // uint degree = getDegree(src);
@@ -318,6 +316,22 @@ class gpu_graph {
     // }
     return adjncy[xadj[idx] + offset];
   }
+
+  __device__ float getEdgeWeight(uint src, uint dst) {
+    if(adjwgt == nullptr) {
+      return 1.0;
+    }
+    uint offset = BinarySearch(adjncy + xadj[src], getDegree(src), dst);
+    if (offset == 0) {
+      return 1.0;
+    }
+    return adjwgt[xadj[src] + offset];
+  }
+
+  __host__ edge_t getEdgeNum() {
+    return local_edge_num;
+  }
+
   __device__ vtx_t *getNeighborPtr(edge_t idx) { return adjncy + xadj[idx]; }
   __device__ void UpdateWalkerState(uint idx, uint info);
 };

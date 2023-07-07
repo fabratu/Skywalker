@@ -7,19 +7,24 @@
  */
 #include "app.cuh"
 
-__global__ void sample_kernel_escape(Walker *walker, float ratio) {
+__global__ void sample_kernel_escape_k(Walker *walker, float ratio) {
   Jobs_result<JobType::RW, uint> &result = walker->result;
   gpu_graph *graph = &walker->ggraph;
   curandState state;
   curand_init(TID, 0, 0, &state);
 
-  // TODO: add state for num runs
   size_t idx_i = TID;
   uint src = graph->adjsrc[idx_i];
+  uint dest = graph->maxInD;
   uint k = graph->adjk[idx_i];
 
+  if(TID == 0) {
+    printf("Pivot element: %d\n", dest);
+    printf("Size: %d\n", result.size);
+  }
+
   if (idx_i < result.size) {
-    // printf("TID: %d, Src: %d (Degree: %d), Current: %d\n", (uint)idx_i, graph->adjsrc[TID], graph->getDegree(graph->adjsrc[TID]), graph->adjk[TID]);
+    // printf("TID: %d, Src: %d k: %d Dest: %d ", TID, src, k, dest);
 
     uint currentDegree = graph->getDegree(src);
     assert(currentDegree > 0);
@@ -27,19 +32,30 @@ __global__ void sample_kernel_escape(Walker *walker, float ratio) {
     size_t numRuns = walker->num_runs / currentDegree;
 
     uint divider = (uint)1.0/ratio;
-    if (divider > currentDegree)
-      numRuns = divider; 
+    if (currentDegree > divider)
+      numRuns = walker->num_runs / divider;
+
+    // if(threadIdx.x == 0) {
+    //   printf("Src: %d Degree: %d, Divider: %d, Num runs: %d\n", src, currentDegree, divider, (uint)numRuns);
+    // }
+    
 
     uint sumPhiLocal = 0;
-    
+    uint current = k;
+    //TODO: If maxlength is reached, create an additional RW (no info created by current one)
+    uint maxLength = 100;
+    uint currentLength = 0;
+
     for (size_t i = 0; i < numRuns; i++) {
-      uint current = k;
-      currentDegree = graph->getDegree(current);
+      current = k;
+      currentLength = 0;
       do {
         if(current == src) {
           sumPhiLocal += 1;
+          // printf("TID: %d -> Source reached.\n",TID);
           break;
         }
+        currentDegree = graph->getDegree(current);
         Vector_virtual<uint> alias;
         Vector_virtual<float> prob;
         alias.Construt(
@@ -64,13 +80,109 @@ __global__ void sample_kernel_escape(Walker *walker, float ratio) {
             current = graph->getOutNode(current, candidate);
           // }
         } else if (currentDegree == 0) {
-          result.alive[idx_i] = 0;
+          //result.alive[idx_i] = 0;
+          // printf("TID: %d -> Dead end reached.\n",TID);
           break;
         } else {
           current = graph->getOutNode(current, 0);
         }
-      } while (result.alive[idx_i] != 0 && current != graph->maxD);
-    } 
+        currentLength++;
+        // if(currentLength == maxLength) {
+        //   printf("TID: %d -> RW too long.\n",TID);
+        // }
+        // if(current == dest) {
+        //   printf("TID: %d -> Dest reached.\n",TID);
+        // }
+      } while (currentLength < maxLength && current != dest);
+      // while (result.alive[idx_i] != 0 && current != dest);
+      // printf("TID: %d finished run %d of %d.\n", TID, (uint)(i+1), (uint)numRuns);
+    }
+
+    // ToDo: Use weighted degree (degree sum of all neighbors)
+    float resultSum = graph->getEdgeWeight(src,k) / graph->getDegree(src) * (float)sumPhiLocal / numRuns;
+    printf("Result: %.2f Phi: %d\n", resultSum, sumPhiLocal);
+    // printf("TID: %d -> Result sum: %.2f\n", TID, resultSum);
+    atomicAdd(&result.escape_array[src], resultSum);
+    // printf("TID: %d -> Intermediate global entry for %d: %.2f\n", TID, src, result.escape_array[src]);
+  }
+}
+
+__global__ void sample_kernel_escape(Walker *walker) {
+  Jobs_result<JobType::RW, uint> &result = walker->result;
+  gpu_graph *graph = &walker->ggraph;
+  curandState state;
+  curand_init(TID, 0, 0, &state);
+
+  size_t idx_i = TID;
+  uint src =idx_i;
+  uint dest = graph->maxInD;
+  uint current = src;
+
+  if(TID == 0) {
+    printf("Pivot element: %d\n", dest);
+    printf("Size: %d\n", result.size);
+    printf("Num runs: %d\n", walker->num_runs);
+  }
+
+  if (idx_i < result.size) {
+    size_t numRuns = walker->num_runs;
+    uint sumEscapeLocal = 0;
+    uint maxLength = 2000;
+    uint currentLength = 0;
+
+    for (size_t i = 0; i < numRuns; i++) {
+      current = src;
+      currentLength = 0;
+      do {
+        uint currentDegree = graph->getDegree(current);
+        Vector_virtual<uint> alias;
+        Vector_virtual<float> prob;
+        alias.Construt(
+            graph->alias_array + graph->xadj[current] - graph->local_vtx_offset,
+            currentDegree);
+        prob.Construt(
+            graph->prob_array + graph->xadj[current] - graph->local_vtx_offset,
+            currentDegree);
+        alias.Init(currentDegree);
+        prob.Init(currentDegree);
+        const uint target_size = 1;
+        if (target_size < currentDegree) {
+          int col = (int)floor(curand_uniform(&state) * currentDegree);
+          float p = curand_uniform(&state);
+          uint candidate;
+          if (p < prob[col])
+            candidate = col;
+          else
+            candidate = alias[col];
+            current = graph->getOutNode(current, candidate);
+        } else if (currentDegree == 0) {
+          // printf("TID: %d -> Dead end reached.\n",TID);
+          break;
+        } else {
+          current = graph->getOutNode(current, 0);
+        }
+        if(current == src) {
+          sumEscapeLocal += 1;
+          // printf("TID: %d -> Source reached.\n",TID);
+          break;
+        }
+
+        currentLength++;
+        // if(currentLength == maxLength) {
+        //   printf("TID: %d -> RW too long.\n",TID);
+        // }
+        // if(current == dest) {
+        //   printf("TID: %d -> Dest reached.\n",TID);
+        // }
+      } while (currentLength < maxLength && current != dest);
+    }
+    result.escape_array[src] = (float)sumEscapeLocal / numRuns;
+    // ToDo: Use weighted degree (degree sum of all neighbors)
+    // float resultSum = graph->getEdgeWeight(src,k) / graph->getDegree(src) * (float)sumPhiLocal / numRuns;
+    // printf("Result: %.2f Phi: %d\n", resultSum, sumPhiLocal);
+    // printf("TID: %d -> Result sum: %.2f\n", TID, resultSum);
+    // atomicAdd(&result.escape_array[src], resultSum);
+    printf("TID: %d -> Entry for %d: %.2f\n", TID, src, result.escape_array[src]);
   }
 }
 
@@ -293,9 +405,10 @@ float OfflineWalk(Walker &walker) {
       sample_kernel_static<<<walker.num_seed / BLOCK_SIZE + 1, BLOCK_SIZE, 0,
                              0>>>(sampler_ptr);
   } else if (FLAGS_escape) {
-    LOG("Escape\n", __FUNCTION__);
-    sample_kernel_escape<<<walker.num_seed / BLOCK_SIZE + 1, BLOCK_SIZE, 0,
-                             0>>>(sampler_ptr, FLAGS_ratio);
+    LOG("Escape with %d threads.\n", walker.num_seed);
+    // sample_kernel_escape_k<<<walker.num_seed / BLOCK_SIZE + 1, BLOCK_SIZE, 0,
+                            //  0>>>(sampler_ptr, FLAGS_ratio);
+    sample_kernel_escape<<<walker.num_seed / BLOCK_SIZE + 1, BLOCK_SIZE, 0, 0>>>(sampler_ptr);                         
   } else
     sample_kernel<<<block_num, BLOCK_SIZE, 0, 0>>>(sampler_ptr);
 #endif
@@ -310,6 +423,6 @@ float OfflineWalk(Walker &walker) {
   walker.sampled_edges = walker.result.GetSampledNumber();
   LOG("sampled_edges %d\n", walker.sampled_edges);
   if (FLAGS_printresult) print_result<<<1, 32, 0, 0>>>(sampler_ptr);
-  CUDA_RT_CALL(cudaDeviceSynchronize());
+
   return total_time;
 }
